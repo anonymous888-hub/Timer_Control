@@ -533,7 +533,19 @@ var elTime=document.getElementById('liveTime');
 var elSt=document.getElementById('liveStatus');
 var elProg=document.getElementById('progFill');
 
-function startMirror(){ if(mirrorT)return; mirrorT=setInterval(function(){ if(running){tLeft--;renderLive();pushState();}},1000); }
+function startMirror(){
+  if(mirrorT)return;
+  var lastTick=Date.now();
+  mirrorT=setInterval(function(){
+    if(!running)return;
+    var now=Date.now();
+    var elapsed=Math.round((now-lastTick)/1000);
+    lastTick=now;
+    tLeft-=elapsed;
+    renderLive();
+    pushState();
+  },1000);
+}
 function stopMirror(){ clearInterval(mirrorT); mirrorT=null; }
 function renderLive(){
   var neg=tLeft<0, abs=Math.abs(tLeft);
@@ -560,7 +572,7 @@ function pushState(){
     defaultTime: defT,
     timeLeft:    tLeft,
     isRunning:   running,
-    updatedAt:   Date.now()
+    updatedAt:   firebase.database.ServerValue.TIMESTAMP
   });
 }
 
