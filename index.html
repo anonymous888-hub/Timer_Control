@@ -617,15 +617,37 @@ function setGridCols(n){
 
 /* ═══ SHORTCUTS DATA ═══ */
 var shortcuts=[], editMode=false, dragFrom=-1, ctxId=null;
-var LS='kk_btns_v3', PREF='kk_pref_v2';
+var PREF='kk_pref_v2';
+var _btnsRef=null, _btnsListening=false, _ignoreNextSnap=false;
 
+/* ── load: อ่าน prefs จาก localStorage, shortcuts จาก Firebase ── */
 function loadData(){
-  try{shortcuts=JSON.parse(localStorage.getItem(LS)||'[]');}catch(e){shortcuts=[];}
   try{var p=JSON.parse(localStorage.getItem(PREF)||'{}');if(p.cols)setGridCols(p.cols);}catch(e){}
-  if(!shortcuts.length)seedDefaults();
-  renderGrid();
+  var user=firebase.auth().currentUser;
+  if(!user)return;
+  _btnsRef=db.ref('users/'+user.uid+'/shortcuts');
+  if(!_btnsListening){
+    _btnsListening=true;
+    _btnsRef.on('value',function(snap){
+      if(_ignoreNextSnap){_ignoreNextSnap=false;return;}
+      var val=snap.val();
+      if(val&&Array.isArray(val)&&val.length){
+        shortcuts=val;
+      } else if(!shortcuts.length){
+        seedDefaults();return; // seedDefaults calls saveData which writes to FB
+      }
+      renderGrid();
+    });
+  }
 }
-function saveData(){localStorage.setItem(LS,JSON.stringify(shortcuts));}
+
+/* ── saveData: เขียนลง Firebase เท่านั้น ── */
+function saveData(){
+  var user=firebase.auth().currentUser;
+  if(!user||!_btnsRef)return;
+  _ignoreNextSnap=true; // ป้องกัน re-render loop
+  _btnsRef.set(shortcuts);
+}
 function savePref(){localStorage.setItem(PREF,JSON.stringify({cols:gridCols}));}
 
 function seedDefaults(){
@@ -639,7 +661,7 @@ function seedDefaults(){
     {id:uid(),label:'＋1 นาที',sub:'เพิ่มเวลา',    cmdType:'add',    cmdValue:'60',    icon:'＋',color:'#34d399'},
     {id:uid(),label:'－1 นาที',sub:'ลดเวลา',       cmdType:'sub',    cmdValue:'60',    icon:'－',color:'#f472b6'},
   ];
-  saveData();
+  saveData(); renderGrid();
 }
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 
@@ -900,6 +922,11 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('logEmail').value='';
     document.getElementById('logPass').value='';
     document.getElementById('loginErr').textContent='';
+    // detach Firebase shortcuts listener
+    if(_btnsRef){_btnsRef.off();_btnsRef=null;}
+    _btnsListening=false;
+    shortcuts=[];
+    document.getElementById('scGrid').innerHTML='';
   }
 });
 
