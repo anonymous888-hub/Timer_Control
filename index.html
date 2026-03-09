@@ -151,6 +151,15 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .sc-btn::after{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--bc);opacity:.9;pointer-events:none;}
 .sc-btn:not(.sc-ed):hover{transform:translateY(-2px);box-shadow:0 7px 26px rgba(0,0,0,.5);}
 .sc-btn:not(.sc-ed):active{transform:scale(.95);}
+/* cols=1: ปุ่มเป็น row แทน square */
+.cg[style*="--cols:1"] .sc-btn,
+.cg[style*="--cols: 1"] .sc-btn{aspect-ratio:unset;flex-direction:row;justify-content:flex-start;gap:14px;padding:14px 18px;}
+.cg[style*="--cols:1"] .sc-num,
+.cg[style*="--cols: 1"] .sc-num{position:static;font-size:13px;color:rgba(255,255,255,.35);min-width:22px;text-align:right;}
+.cg[style*="--cols:1"] .sc-icon,
+.cg[style*="--cols: 1"] .sc-icon{font-size:26px;}
+.cg[style*="--cols:1"] .sc-add,
+.cg[style*="--cols: 1"] .sc-add{aspect-ratio:unset;flex-direction:row;height:60px;gap:10px;}
 .sc-btn.sc-flash{animation:flash .2s ease;}
 @keyframes flash{0%{filter:brightness(1)}50%{filter:brightness(2.2)}100%{filter:brightness(1)}}
 .sc-btn.sc-ed{cursor:default;border-color:rgba(255,215,0,.3);background:rgba(255,215,0,.03);}
@@ -520,7 +529,7 @@ function timerRef(path){
 /* ── คำนวณ tLeft ปัจจุบันจาก Firebase state ── */
 function calcCurrentTime(){
   if(_fbRunning && _fbUpdatedAt){
-    return _fbTimeLeft - Math.round((Date.now()-_fbUpdatedAt)/1000);
+    return _fbTimeLeft - Math.floor((Date.now()-_fbUpdatedAt)/1000);
   }
   return _fbTimeLeft;
 }
@@ -547,13 +556,16 @@ function attachTimerListener(){
     if(!_fbRunning && _liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
   });
 
-  _startLiveInterval();
+  // เริ่ม tick เฉพาะถ้า running อยู่แล้วตอน attach
+  if(_fbRunning) _startLiveInterval();
 }
 
 function detachTimerListener(){
-  if(timerRef) timerRef('state').off();
+  var user=firebase.auth().currentUser;
+  if(user&&db) db.ref('users/'+user.uid+'/timer/state').off();
   if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
   _timerListening=false;
+  _fbRunning=false; running=false; _fbUpdatedAt=null;
 }
 
 /* ── Local display tick: คำนวณจาก _fbUpdatedAt ไม่ push Firebase ── */
@@ -721,7 +733,7 @@ var PREF='kk_pref_v2';
 var _btnsRef=null, _btnsListening=false, _ignoreNextSnap=false;
 
 function loadData(){
-  try{var p=JSON.parse(localStorage.getItem(PREF)||'{}');if(p.cols)setGridCols(p.cols);}catch(e){}
+  // cols ถูก lock ไว้ที่ 1 ไม่โหลดจาก localStorage
   var user=firebase.auth().currentUser;
   if(!user)return;
   _btnsRef=db.ref('users/'+user.uid+'/shortcuts');
@@ -779,7 +791,7 @@ function runShortcut(id){
   if(!sc||!firebase.auth().currentUser)return;
 
   if(sc.cmdType==='control'){
-    applyCmd(sc.cmdValue, 'custom', sc.label);
+    applyCmd(sc.cmdValue, sc.cmdValue, sc.label);
   } else if(sc.cmdType==='set'){
     setPreset(+sc.cmdValue, null);
   } else if(sc.cmdType==='add'){
