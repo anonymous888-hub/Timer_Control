@@ -525,7 +525,8 @@ function timerRef(path){
 /* ── คำนวณ tLeft ปัจจุบันจาก Firebase state ── */
 function calcCurrentTime(){
   if(_fbRunning && _fbUpdatedAt){
-    return _fbTimeLeft - Math.floor((Date.now()-_fbUpdatedAt)/1000);
+    var elapsed = Math.max(0, Math.floor((Date.now()-_fbUpdatedAt)/1000));
+    return _fbTimeLeft - elapsed;
   }
   return _fbTimeLeft;
 }
@@ -615,7 +616,7 @@ function applyCmd(cmd, logType, logDetail){
     // คำนวณ timeLeft ล่าสุดก่อน start
     var currentT = calcCurrentTime();
     running=true; _fbRunning=true;
-    _fbTimeLeft=currentT; tLeft=currentT;
+    _fbTimeLeft=currentT; _fbUpdatedAt=null; tLeft=currentT;  // clear stale timestamp
     renderLive();
     timerRef('command').set(cmd);
     pushTimerState(true, currentT, defT);
