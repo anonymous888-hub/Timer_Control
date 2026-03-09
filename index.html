@@ -539,13 +539,20 @@ var elTime=document.getElementById('liveTime');
 var elSt=document.getElementById('liveStatus');
 var elProg=document.getElementById('progFill');
 
+/* ── User-scoped timer paths ── */
+function timerRef(path){
+  var user=firebase.auth().currentUser;
+  if(!user)return null;
+  return db.ref('users/'+user.uid+'/timer/'+path);
+}
+
 /* ── subscribe timer/state จาก Firebase — sync ทุก controller ── */
 var _timerListening=false;
 function attachTimerListener(){
   if(_timerListening)return;
   _timerListening=true;
 
-  db.ref('timer/state').on('value',function(snap){
+  timerRef('state').on('value',function(snap){
     if(_localCmd)return;
     var st=snap.val(); if(!st)return;
     if(typeof st.defaultTime==='number'&&st.defaultTime>0) defT=st.defaultTime;
@@ -565,7 +572,7 @@ function attachTimerListener(){
 }
 
 function detachTimerListener(){
-  db.ref('timer/state').off();
+  timerRef('state').off();
   if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
   _timerListening=false;
 }
@@ -580,7 +587,7 @@ function _startLiveInterval(){
     // push Firebase ทุกวินาที (controller เดียวกันนับเวลา)
     // ใช้ _localCmd เพื่อไม่ให้ listener echo กลับ
     _localCmd=true;
-    db.ref('timer/state').set({
+    timerRef('state').set({
       defaultTime:defT,
       timeLeft:tLeft,
       isRunning:true,
@@ -606,7 +613,7 @@ function renderLive(){
 function pushState(overrideLeft){
   if(!firebase.auth().currentUser||!db)return;
   var val=typeof overrideLeft==='number'?overrideLeft:tLeft;
-  db.ref('timer/state').set({
+  timerRef('state').set({
     defaultTime:defT,
     timeLeft:val,
     isRunning:running,
@@ -622,7 +629,7 @@ function applyCmd(cmd){
   else if(cmd==='reset'||cmd==='stop'){ running=false; tLeft=defT; _fbTimeLeft=defT; }
   renderLive();
   _localCmd=true;
-  db.ref('timer/command').set(cmd);
+  timerRef('command').set(cmd);
   pushState();
   setTimeout(function(){_localCmd=false;},800);
 }
@@ -641,7 +648,7 @@ function setPreset(sec,el){
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
   if(el)el.classList.add('active');
   _localCmd=true;
-  db.ref('timer/command').set('set_'+sec);
+  timerRef('command').set('set_'+sec);
   pushState(sec);
   setTimeout(function(){_localCmd=false;},600);
   addLog('set',hms(sec));
@@ -655,7 +662,7 @@ function applyCustomTime(){
   renderLive();
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
   _localCmd=true;
-  db.ref('timer/command').set('set_'+t);
+  timerRef('command').set('set_'+t);
   pushState(t);
   setTimeout(function(){_localCmd=false;},600);
   addLog('set',hms(t));
@@ -667,7 +674,7 @@ function adjustTime(d){
   var cmd=d>0?'add_'+d:'sub_'+(-d)+'_'+Date.now();
   renderLive();
   _localCmd=true;
-  db.ref('timer/command').set(cmd);
+  timerRef('command').set(cmd);
   pushState();
   setTimeout(function(){_localCmd=false;},600);
   addLog(d>0?'add':'sub',(d>0?'+':'')+d+'s');
@@ -776,7 +783,7 @@ function runShortcut(id){
     tLeft=Math.max(tLeft-(+sc.cmdValue),-MAXNEG);
   }
   renderLive();
-  db.ref('timer/command').set(cmd);
+  timerRef('command').set(cmd);
   pushState();
   setTimeout(function(){_localCmd=false;},800);
   addLog('custom',sc.label);
