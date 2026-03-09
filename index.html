@@ -528,25 +528,68 @@ var COLORS=['#7ee8fa','#ff80ab','#ffd700','#00ff88','#ff4444','#c084fc','#fb923c
 var CTRL=[{v:'start',l:'▶ START'},{v:'pause',l:'⏸ PAUSE'},{v:'reset',l:'↺ RESET'},{v:'stop',l:'■ STOP'}];
 
 /* ═══ TIMER STATE ═══ */
-var defT=300, tLeft=300, running=false, mirrorT=null;
+var defT=300, tLeft=300, running=false;
+// _fb* = ค่าจาก Firebase (source of truth)
+var _fbTimeLeft=300, _fbUpdatedAt=null, _fbRunning=false;
+// _localCmd = true ขณะที่ controller ตัวนี้กำลัง push command (ป้องกัน echo loop)
+var _localCmd=false;
+var _liveInterval=null;
+
 var elTime=document.getElementById('liveTime');
 var elSt=document.getElementById('liveStatus');
 var elProg=document.getElementById('progFill');
 
-function startMirror(){
-  if(mirrorT)return;
-  var lastTick=Date.now();
-  mirrorT=setInterval(function(){
-    if(!running)return;
-    var now=Date.now();
-    var elapsed=Math.round((now-lastTick)/1000);
-    lastTick=now;
-    tLeft-=elapsed;
+/* ── subscribe timer/state จาก Firebase — sync ทุก controller ── */
+var _timerListening=false;
+function attachTimerListener(){
+  if(_timerListening)return;
+  _timerListening=true;
+
+  db.ref('timer/state').on('value',function(snap){
+    if(_localCmd)return;
+    var st=snap.val(); if(!st)return;
+    if(typeof st.defaultTime==='number'&&st.defaultTime>0) defT=st.defaultTime;
+    if(typeof st.timeLeft==='number')  _fbTimeLeft=st.timeLeft;
+    if(typeof st.updatedAt==='number') _fbUpdatedAt=st.updatedAt;
+    if(typeof st.isRunning==='boolean'){_fbRunning=st.isRunning; running=st.isRunning;}
+    tLeft=_fbRunning&&_fbUpdatedAt
+      ? _fbTimeLeft-Math.round((Date.now()-_fbUpdatedAt)/1000)
+      : _fbTimeLeft;
     renderLive();
-    pushState();
+    // จัดการ interval ตาม state
+    if(_fbRunning&&!_liveInterval)  _startLiveInterval();
+    else if(!_fbRunning&&_liveInterval){ clearInterval(_liveInterval);_liveInterval=null; }
+  });
+
+  _startLiveInterval();
+}
+
+function detachTimerListener(){
+  db.ref('timer/state').off();
+  if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
+  _timerListening=false;
+}
+
+function _startLiveInterval(){
+  if(_liveInterval)return;
+  _liveInterval=setInterval(function(){
+    if(!_fbRunning||!_fbUpdatedAt)return;
+    // smooth display
+    tLeft=_fbTimeLeft-Math.round((Date.now()-_fbUpdatedAt)/1000);
+    renderLive();
+    // push Firebase ทุกวินาที (controller เดียวกันนับเวลา)
+    // ใช้ _localCmd เพื่อไม่ให้ listener echo กลับ
+    _localCmd=true;
+    db.ref('timer/state').set({
+      defaultTime:defT,
+      timeLeft:tLeft,
+      isRunning:true,
+      updatedAt:firebase.database.ServerValue.TIMESTAMP
+    });
+    setTimeout(function(){_localCmd=false;},400);
   },1000);
 }
-function stopMirror(){ clearInterval(mirrorT); mirrorT=null; }
+
 function renderLive(){
   var neg=tLeft<0, abs=Math.abs(tLeft);
   var h=Math.floor(abs/3600), m=Math.floor((abs%3600)/60).toString().padStart(2,'0'), s=(abs%60).toString().padStart(2,'0');
@@ -558,49 +601,76 @@ function renderLive(){
   else{elProg.style.background='#7ee8fa';elSt.textContent=running?'— RUNNING —':'— READY —';}
   elProg.style.transform='scaleX('+Math.max(0,tLeft/defT)+')';
 }
-function mirrorCmd(cmd){
-  if(cmd==='start'){running=true;startMirror();}
-  else if(cmd==='pause'){running=false;stopMirror();}
-  else if(cmd==='reset'||cmd==='stop'){running=false;stopMirror();tLeft=defT;}
-  renderLive();
+
+/* Push full state → Firebase (source of truth) */
+function pushState(overrideLeft){
+  if(!firebase.auth().currentUser||!db)return;
+  var val=typeof overrideLeft==='number'?overrideLeft:tLeft;
+  db.ref('timer/state').set({
+    defaultTime:defT,
+    timeLeft:val,
+    isRunning:running,
+    updatedAt:firebase.database.ServerValue.TIMESTAMP
+  });
 }
 
-/* Push full state to Firebase so display can sync */
-function pushState(){
-  if(!firebase.auth().currentUser||!db) return;
-  db.ref('timer/state').set({
-    defaultTime: defT,
-    timeLeft:    tLeft,
-    isRunning:   running,
-    updatedAt:   firebase.database.ServerValue.TIMESTAMP
-  });
+/* applyCmd: push Firebase เท่านั้น ไม่แตะ local interval */
+function applyCmd(cmd){
+  if(!firebase.auth().currentUser||!db)return;
+  if(cmd==='start')      { running=true;  }
+  else if(cmd==='pause') { running=false; }
+  else if(cmd==='reset'||cmd==='stop'){ running=false; tLeft=defT; _fbTimeLeft=defT; }
+  renderLive();
+  _localCmd=true;
+  db.ref('timer/command').set(cmd);
+  pushState();
+  setTimeout(function(){_localCmd=false;},800);
 }
 
 /* ═══ SEND CMD ═══ */
 var db;
 function sendCmd(cmd,lt,ld){
   if(!firebase.auth().currentUser)return;
-  db.ref('timer/command').set(cmd); mirrorCmd(cmd); addLog(lt||cmd,ld);
-  pushState();
+  applyCmd(cmd); addLog(lt||cmd,ld);
 }
 function setPreset(sec,el){
-  defT=sec;tLeft=sec;stopMirror();running=false;renderLive();
+  if(!firebase.auth().currentUser)return;
+  defT=sec; tLeft=sec; running=false;
+  clearInterval(_liveInterval); _liveInterval=null;
+  renderLive();
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
   if(el)el.classList.add('active');
-  db.ref('timer/command').set('set_'+sec); addLog('set',hms(sec)); pushState();
+  _localCmd=true;
+  db.ref('timer/command').set('set_'+sec);
+  pushState(sec);
+  setTimeout(function(){_localCmd=false;},600);
+  addLog('set',hms(sec));
 }
 function applyCustomTime(){
+  if(!firebase.auth().currentUser)return;
   var h=+document.getElementById('tHH').value||0, m=+document.getElementById('tMM').value||0, s=+document.getElementById('tSS').value||0;
   var t=h*3600+m*60+s; if(t<=0)return;
-  defT=t;tLeft=t;stopMirror();running=false;renderLive();
+  defT=t; tLeft=t; running=false;
+  clearInterval(_liveInterval); _liveInterval=null;
+  renderLive();
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
-  db.ref('timer/command').set('set_'+t); addLog('set',hms(t)); pushState();
+  _localCmd=true;
+  db.ref('timer/command').set('set_'+t);
+  pushState(t);
+  setTimeout(function(){_localCmd=false;},600);
+  addLog('set',hms(t));
 }
 function adjustTime(d){
-  var cmd;
-  if(d>0){cmd='add_'+d;tLeft+=d;defT=Math.max(defT,tLeft);}
-  else{cmd='sub_'+(-d)+'_'+Date.now();tLeft=Math.max(tLeft+d,-MAXNEG);}
-  renderLive(); db.ref('timer/command').set(cmd); addLog(d>0?'add':'sub',(d>0?'+':'')+d+'s'); pushState();
+  if(!firebase.auth().currentUser)return;
+  if(d>0){tLeft+=d; defT=Math.max(defT,tLeft);}
+  else{tLeft=Math.max(tLeft+d,-MAXNEG);}
+  var cmd=d>0?'add_'+d:'sub_'+(-d)+'_'+Date.now();
+  renderLive();
+  _localCmd=true;
+  db.ref('timer/command').set(cmd);
+  pushState();
+  setTimeout(function(){_localCmd=false;},600);
+  addLog(d>0?'add':'sub',(d>0?'+':'')+d+'s');
 }
 
 /* ═══ LOG ═══ */
@@ -692,12 +762,24 @@ function runShortcut(id){
   var sc=shortcuts.find(function(s){return s.id===id;});
   if(!sc||!firebase.auth().currentUser)return;
   var cmd=buildCmd(sc);
+  _localCmd=true;
+  if(sc.cmdType==='control'){
+    if(cmd==='start')      running=true;
+    else if(cmd==='pause') running=false;
+    else if(cmd==='reset'||cmd==='stop'){ running=false; tLeft=defT; _fbTimeLeft=defT; }
+  } else if(sc.cmdType==='set'){
+    defT=+sc.cmdValue; tLeft=+sc.cmdValue; running=false;
+    if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
+  } else if(sc.cmdType==='add'){
+    tLeft+=+sc.cmdValue; defT=Math.max(defT,tLeft);
+  } else if(sc.cmdType==='sub'){
+    tLeft=Math.max(tLeft-(+sc.cmdValue),-MAXNEG);
+  }
+  renderLive();
   db.ref('timer/command').set(cmd);
-  if(sc.cmdType==='control')mirrorCmd(cmd);
-  else if(sc.cmdType==='set'){defT=+sc.cmdValue;tLeft=+sc.cmdValue;stopMirror();running=false;renderLive();}
-  else if(sc.cmdType==='add'){tLeft+=+sc.cmdValue;defT=Math.max(defT,tLeft);renderLive();}
-  else if(sc.cmdType==='sub'){tLeft=Math.max(tLeft-(+sc.cmdValue),-MAXNEG);renderLive();}
-  addLog('custom',sc.label); pushState();
+  pushState();
+  setTimeout(function(){_localCmd=false;},800);
+  addLog('custom',sc.label);
   var el=document.querySelector('[data-id="'+id+'"]');
   if(el){el.classList.add('sc-flash');setTimeout(function(){el.classList.remove('sc-flash');},230);}
 }
@@ -927,23 +1009,9 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('uName').textContent=user.displayName||user.email;
     if(user.photoURL){var a=document.getElementById('uAvatar');a.src=user.photoURL;a.style.display='block';}
 
-    // ── Restore timer state from Firebase on refresh ──
-    db.ref('timer/state').once('value',function(snap){
-      var st=snap.val();
-      if(st){
-        if(typeof st.defaultTime==='number'&&st.defaultTime>0) defT=st.defaultTime;
-        if(typeof st.timeLeft==='number') tLeft=st.timeLeft;
-        if(st.isRunning){
-          // คำนวณเวลาที่ผ่านไปตั้งแต่ last update
-          var elapsed=st.updatedAt?Math.floor((Date.now()-st.updatedAt)/1000):0;
-          tLeft=tLeft-elapsed;
-          running=true;
-          startMirror();
-        }
-        renderLive();
-      }
-      loadData();
-    });
+    // ── Subscribe timer/state real-time (source of truth) ──
+    attachTimerListener();
+    loadData();
   }else{
     document.getElementById('loginScreen').style.cssText='display:flex;opacity:1;';
     document.getElementById('uAvatar').style.display='none';
@@ -951,9 +1019,10 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('logEmail').value='';
     document.getElementById('logPass').value='';
     document.getElementById('loginErr').textContent='';
-    // detach Firebase shortcuts listener
+    // detach Firebase shortcuts + timer listeners
     if(_btnsRef){_btnsRef.off();_btnsRef=null;}
     _btnsListening=false;
+    detachTimerListener();
     shortcuts=[];
     document.getElementById('scGrid').innerHTML='';
   }
