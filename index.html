@@ -503,94 +503,91 @@ var COLORS=['#7ee8fa','#ff80ab','#ffd700','#00ff88','#ff4444','#c084fc','#fb923c
 var CTRL=[{v:'start',l:'▶ START'},{v:'pause',l:'⏸ PAUSE'},{v:'reset',l:'↺ RESET'},{v:'stop',l:'■ STOP'}];
 
 /* ═══ TIMER STATE ═══ */
-var defT=300, tLeft=300, running=false;
-// Firebase source-of-truth values
-var _fbTimeLeft=300, _fbUpdatedAt=null, _fbRunning=false;
-// local display ticker
-var _liveInterval=null;
-// สำหรับ subscribe Firebase ฝั่ง controller
-var _timerListening=false;
+const fb = {
+  defT:      300,   // default time
+  tLeft:     300,   // current display time
+  running:   false,
+  timeLeft:  300,   // Firebase source value
+  updatedAt: null,  // Firebase server timestamp
+};
+let _liveInterval  = null;
+let _timerListening = false;
 
-var elTime=document.getElementById('liveTime');
-var elSt=document.getElementById('liveStatus');
-var elProg=document.getElementById('progFill');
+const elTime = document.getElementById('liveTime');
+const elSt   = document.getElementById('liveStatus');
+const elProg = document.getElementById('progFill');
 
 /* ── User-scoped timer paths ── */
 function timerRef(path){
-  var user=firebase.auth().currentUser;
+  const user=firebase.auth().currentUser;
   if(!user)return null;
   return db.ref('users/'+user.uid+'/timer/'+path);
 }
 
 /* ── คำนวณ tLeft ปัจจุบันจาก Firebase state ── */
 function calcCurrentTime(){
-  if(_fbRunning && _fbUpdatedAt){
-    var elapsed = Math.max(0, Math.floor((Date.now()-_fbUpdatedAt)/1000));
-    return _fbTimeLeft - elapsed;
+  if(fb.running && fb.updatedAt){
+    const elapsed = Math.max(0, Math.floor((Date.now()-fb.updatedAt)/1000));
+    return fb.timeLeft - elapsed;
   }
-  return _fbTimeLeft;
+  return fb.timeLeft;
 }
 
-/* ── subscribe timer/state — sync display เท่านั้น ── */
+/* ── subscribe timer/state ── */
 function attachTimerListener(){
   if(_timerListening)return;
   _timerListening=true;
 
   timerRef('state').on('value',function(snap){
-    var st=snap.val(); if(!st)return;
-    if(typeof st.defaultTime==='number'&&st.defaultTime>0) defT=st.defaultTime;
-    if(typeof st.timeLeft==='number')  _fbTimeLeft=st.timeLeft;
-    if(typeof st.updatedAt==='number') _fbUpdatedAt=st.updatedAt;
-    if(typeof st.isRunning==='boolean'){
-      _fbRunning=st.isRunning;
-      running=st.isRunning;
-    }
-    tLeft=calcCurrentTime();
+    const st=snap.val(); if(!st)return;
+    if(typeof st.defaultTime==='number'&&st.defaultTime>0) fb.defT=st.defaultTime;
+    if(typeof st.timeLeft==='number')  fb.timeLeft=st.timeLeft;
+    if(typeof st.updatedAt==='number') fb.updatedAt=st.updatedAt;
+    if(typeof st.isRunning==='boolean') fb.running=st.isRunning;
+    fb.tLeft=calcCurrentTime();
     renderLive();
 
-    // จัดการ local tick interval
-    if(_fbRunning && !_liveInterval) _startLiveInterval();
-    if(!_fbRunning && _liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
+    if(fb.running && !_liveInterval) _startLiveInterval();
+    if(!fb.running && _liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
   });
 
-  // เริ่ม tick เฉพาะถ้า running อยู่แล้วตอน attach
-  if(_fbRunning) _startLiveInterval();
+  if(fb.running) _startLiveInterval();
 }
 
 function detachTimerListener(){
-  var user=firebase.auth().currentUser;
+  const user=firebase.auth().currentUser;
   if(user&&db) db.ref('users/'+user.uid+'/timer/state').off();
   if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
   _timerListening=false;
-  _fbRunning=false; running=false; _fbUpdatedAt=null;
+  fb.running=false; fb.updatedAt=null;
 }
 
-/* ── Local display tick: คำนวณจาก _fbUpdatedAt ไม่ push Firebase ── */
+/* ── Local display tick ── */
 function _startLiveInterval(){
   if(_liveInterval)return;
   _liveInterval=setInterval(function(){
-    if(!_fbRunning||!_fbUpdatedAt)return;
-    tLeft=calcCurrentTime();
+    if(!fb.running||!fb.updatedAt)return;
+    fb.tLeft=calcCurrentTime();
     renderLive();
   },500);
 }
 
 function renderLive(){
-  var neg=tLeft<0, abs=Math.abs(tLeft);
-  var h=Math.floor(abs/3600), m=Math.floor((abs%3600)/60).toString().padStart(2,'0'), s=(abs%60).toString().padStart(2,'0');
+  const neg=fb.tLeft<0, abs=Math.abs(fb.tLeft);
+  const h=Math.floor(abs/3600), m=Math.floor((abs%3600)/60).toString().padStart(2,'0'), s=(abs%60).toString().padStart(2,'0');
   elTime.textContent=h>0?(neg?'-':'')+h+':'+m+':'+s:(neg?'-':'')+m+':'+s;
   elTime.classList.remove('warning','critical');
-  if(tLeft<=0){
+  if(fb.tLeft<=0){
     elTime.classList.add('critical');elProg.style.background='#ff4444';
-    elSt.textContent=running?'— OVERTIME —':'— STOPPED —';
-  } else if(tLeft<=CRIT){
+    elSt.textContent=fb.running?'— OVERTIME —':'— STOPPED —';
+  } else if(fb.tLeft<=CRIT){
     elTime.classList.add('critical');elProg.style.background='#ff4444';elSt.textContent='— CRITICAL —';
-  } else if(tLeft<=WARN){
+  } else if(fb.tLeft<=WARN){
     elTime.classList.add('warning');elProg.style.background='#ffd700';elSt.textContent='— WARNING —';
   } else {
-    elProg.style.background='#7ee8fa';elSt.textContent=running?'— RUNNING —':'— READY —';
+    elProg.style.background='#7ee8fa';elSt.textContent=fb.running?'— RUNNING —':'— READY —';
   }
-  elProg.style.transform='scaleX('+Math.max(0,tLeft/defT)+')';
+  elProg.style.transform='scaleX('+Math.max(0,fb.tLeft/fb.defT)+')';
 }
 
 /* ════════════════════════════════════════
@@ -613,35 +610,27 @@ function applyCmd(cmd, logType, logDetail){
   if(!firebase.auth().currentUser||!db)return;
 
   if(cmd==='start'){
-    // คำนวณ timeLeft ล่าสุดก่อน start
-    var currentT = calcCurrentTime();
-    running=true; _fbRunning=true;
-    _fbTimeLeft=currentT; _fbUpdatedAt=null; tLeft=currentT;  // clear stale timestamp
+    const currentT = calcCurrentTime();
+    fb.running=true; fb.timeLeft=currentT; fb.updatedAt=null; fb.tLeft=currentT;
     renderLive();
     timerRef('command').set(cmd);
-    pushTimerState(true, currentT, defT);
-    // เริ่ม local tick
+    pushTimerState(true, currentT, fb.defT);
     if(!_liveInterval) _startLiveInterval();
 
   } else if(cmd==='pause'){
-    // บันทึก timeLeft ล่าสุดก่อน pause
-    var currentT = calcCurrentTime();
-    running=false; _fbRunning=false;
-    _fbTimeLeft=currentT; _fbUpdatedAt=null; tLeft=currentT;
-    // หยุด local tick
+    const currentT = calcCurrentTime();
+    fb.running=false; fb.timeLeft=currentT; fb.updatedAt=null; fb.tLeft=currentT;
     if(_liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
     renderLive();
     timerRef('command').set(cmd);
-    pushTimerState(false, currentT, defT);
+    pushTimerState(false, currentT, fb.defT);
 
   } else if(cmd==='reset' || cmd==='stop'){
-    running=false; _fbRunning=false;
-    _fbTimeLeft=defT; _fbUpdatedAt=null; tLeft=defT;
-    // หยุด local tick
+    fb.running=false; fb.timeLeft=fb.defT; fb.updatedAt=null; fb.tLeft=fb.defT;
     if(_liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
     renderLive();
     timerRef('command').set(cmd);
-    pushTimerState(false, defT, defT);
+    pushTimerState(false, fb.defT, fb.defT);
   }
 
   addLog(logType||cmd, logDetail);
@@ -656,10 +645,9 @@ function sendCmd(cmd){
 
 function setPreset(sec, el){
   if(!firebase.auth().currentUser)return;
-  // stop local tick
   if(_liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
-  defT=sec; tLeft=sec; running=false;
-  _fbTimeLeft=sec; _fbRunning=false; _fbUpdatedAt=null;
+  fb.defT=sec; fb.tLeft=sec; fb.running=false;
+  fb.timeLeft=sec; fb.updatedAt=null;
   renderLive();
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
   if(el) el.classList.add('active');
@@ -670,13 +658,13 @@ function setPreset(sec, el){
 
 function applyCustomTime(){
   if(!firebase.auth().currentUser)return;
-  var h=+document.getElementById('tHH').value||0,
-      m=+document.getElementById('tMM').value||0,
-      s=+document.getElementById('tSS').value||0;
-  var t=h*3600+m*60+s; if(t<=0)return;
+  const h=+document.getElementById('tHH').value||0,
+        m=+document.getElementById('tMM').value||0,
+        s=+document.getElementById('tSS').value||0;
+  const t=h*3600+m*60+s; if(t<=0)return;
   if(_liveInterval){ clearInterval(_liveInterval); _liveInterval=null; }
-  defT=t; tLeft=t; running=false;
-  _fbTimeLeft=t; _fbRunning=false; _fbUpdatedAt=null;
+  fb.defT=t; fb.tLeft=t; fb.running=false;
+  fb.timeLeft=t; fb.updatedAt=null;
   renderLive();
   document.querySelectorAll('.pre-chip').forEach(function(b){b.classList.remove('active');});
   timerRef('command').set('set_'+t);
@@ -686,17 +674,16 @@ function applyCustomTime(){
 
 function adjustTime(d){
   if(!firebase.auth().currentUser)return;
-  var currentT = calcCurrentTime();
-  var newT;
-  if(d>0){ newT=currentT+d; defT=Math.max(defT,newT); }
+  const currentT = calcCurrentTime();
+  let newT;
+  if(d>0){ newT=currentT+d; fb.defT=Math.max(fb.defT,newT); }
   else   { newT=Math.max(currentT+d,-MAXNEG); }
-  tLeft=newT; _fbTimeLeft=newT;
-  // ถ้ากำลัง running ให้ reset updatedAt เพื่อ recalibrate
-  if(_fbRunning) _fbUpdatedAt=Date.now();
+  fb.tLeft=newT; fb.timeLeft=newT;
+  if(fb.running) fb.updatedAt=Date.now();
   renderLive();
-  var cmd=d>0?'add_'+d:'sub_'+(-d)+'_'+Date.now();
+  const cmd=d>0?'add_'+d:'sub_'+(-d)+'_'+Date.now();
   timerRef('command').set(cmd);
-  pushTimerState(_fbRunning, newT, defT);
+  pushTimerState(fb.running, newT, fb.defT);
   addLog(d>0?'add':'sub',(d>0?'+':'')+d+'s');
 }
 
