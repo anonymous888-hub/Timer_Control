@@ -914,7 +914,24 @@ firebase.auth().onAuthStateChanged(function(user){
     setTimeout(function(){ls.style.display='none';},420);
     document.getElementById('uName').textContent=user.displayName||user.email;
     if(user.photoURL){var a=document.getElementById('uAvatar');a.src=user.photoURL;a.style.display='block';}
-    loadData();
+
+    // ── Restore timer state from Firebase on refresh ──
+    db.ref('timer/state').once('value',function(snap){
+      var st=snap.val();
+      if(st){
+        if(typeof st.defaultTime==='number'&&st.defaultTime>0) defT=st.defaultTime;
+        if(typeof st.timeLeft==='number') tLeft=st.timeLeft;
+        if(st.isRunning){
+          // คำนวณเวลาที่ผ่านไปตั้งแต่ last update
+          var elapsed=st.updatedAt?Math.floor((Date.now()-st.updatedAt)/1000):0;
+          tLeft=tLeft-elapsed;
+          running=true;
+          startMirror();
+        }
+        renderLive();
+      }
+      loadData();
+    });
   }else{
     document.getElementById('loginScreen').style.cssText='display:flex;opacity:1;';
     document.getElementById('uAvatar').style.display='none';
