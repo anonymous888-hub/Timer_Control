@@ -413,7 +413,12 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
         <div class="sc-page-title">My Shortcuts</div>
         <div class="grid-sz">
           COLS:
-          <div class="gs on" style="cursor:default;">1</div>
+          <div class="gs" onclick="setGridCols(1)" data-c="1">1</div>
+          <div class="gs" onclick="setGridCols(2)" data-c="2">2</div>
+          <div class="gs" onclick="setGridCols(3)" data-c="3">3</div>
+          <div class="gs" onclick="setGridCols(4)" data-c="4">4</div>
+          <div class="gs" onclick="setGridCols(5)" data-c="5">5</div>
+          <div class="gs on" onclick="setGridCols(6)" data-c="6">6</div>
         </div>
       </div>
       <div class="sc-topbar-r">
@@ -421,7 +426,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
         <button class="tb-btn add" onclick="openModal(null)">＋ ADD</button>
       </div>
     </div>
-    <div class="cg" id="scGrid" style="--cols:1"></div>
+    <div class="cg" id="scGrid" style="--cols:6"></div>
   </div>
 </div>
 
@@ -710,7 +715,7 @@ function addLog(t,d){
 function hms(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;return h>0?h+'h'+m+'m':m>0?m+'m'+ss+'s':ss+'s';}
 
 /* ═══ GRID SIZE ═══ */
-var gridCols=1;
+var gridCols=6;
 function setGridCols(n){
   gridCols=n;
   document.getElementById('scGrid').style.setProperty('--cols',n);
@@ -724,9 +729,10 @@ var PREF='kk_pref_v2';
 var _btnsRef=null, _btnsListening=false, _ignoreNextSnap=false;
 
 function loadData(){
-  // cols ถูก lock ไว้ที่ 1 ไม่โหลดจาก localStorage
   var user=firebase.auth().currentUser;
   if(!user)return;
+  // โหลด cols preference จาก localStorage
+  try{var p=JSON.parse(localStorage.getItem(PREF)||'{}');if(p.cols)setGridCols(p.cols);}catch(e){}
   _btnsRef=db.ref('users/'+user.uid+'/shortcuts');
   if(!_btnsListening){
     _btnsListening=true;
