@@ -717,43 +717,65 @@ function hms(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;retur
 /* ═══ GRID SIZE ═══ */
 var gridCols=6;
 function setGridCols(n){
+  // บันทึก shortcuts หน้าปัจจุบันก่อนเปลี่ยนหน้า
+  if(gridCols !== n && firebase.auth().currentUser) _detachPageListener();
   gridCols=n;
   document.getElementById('scGrid').style.setProperty('--cols',n);
   document.querySelectorAll('.gs').forEach(function(b){b.classList.toggle('on',+b.dataset.c===n);});
   savePref();
+  // โหลด shortcuts ของหน้าใหม่
+  if(firebase.auth().currentUser) loadPageShortcuts();
 }
 
 /* ═══ SHORTCUTS DATA ═══ */
 var shortcuts=[], editMode=false, dragFrom=-1, ctxId=null;
 var PREF='kk_pref_v2';
-var _btnsRef=null, _btnsListening=false, _ignoreNextSnap=false;
+var _pageRef=null, _pageListening=false, _ignoreNextSnap=false;
+
+/* path แยกตาม cols หน้า: users/{uid}/shortcuts_page_{1-6} */
+function pageRef(){
+  var user=firebase.auth().currentUser;
+  if(!user||!db)return null;
+  return db.ref('users/'+user.uid+'/shortcuts_page_'+gridCols);
+}
 
 function loadData(){
   var user=firebase.auth().currentUser;
   if(!user)return;
-  // โหลด cols preference จาก localStorage
-  try{var p=JSON.parse(localStorage.getItem(PREF)||'{}');if(p.cols)setGridCols(p.cols);}catch(e){}
-  _btnsRef=db.ref('users/'+user.uid+'/shortcuts');
-  if(!_btnsListening){
-    _btnsListening=true;
-    _btnsRef.on('value',function(snap){
-      if(_ignoreNextSnap){_ignoreNextSnap=false;return;}
-      var val=snap.val();
-      if(val&&Array.isArray(val)&&val.length){
-        shortcuts=val;
-      } else if(!shortcuts.length){
-        seedDefaults();return;
-      }
-      renderGrid();
-    });
-  }
+  try{var p=JSON.parse(localStorage.getItem(PREF)||'{}');if(p.cols)gridCols=p.cols;}catch(e){}
+  // sync UI cols
+  document.getElementById('scGrid').style.setProperty('--cols',gridCols);
+  document.querySelectorAll('.gs').forEach(function(b){b.classList.toggle('on',+b.dataset.c===gridCols);});
+  loadPageShortcuts();
+}
+
+function _detachPageListener(){
+  if(_pageRef){ _pageRef.off(); _pageRef=null; }
+  _pageListening=false;
+}
+
+function loadPageShortcuts(){
+  _detachPageListener();
+  shortcuts=[];
+  _pageRef=pageRef();
+  if(!_pageRef)return;
+  _pageListening=true;
+  _pageRef.on('value',function(snap){
+    if(_ignoreNextSnap){_ignoreNextSnap=false;return;}
+    var val=snap.val();
+    if(val&&Array.isArray(val)&&val.length){
+      shortcuts=val; renderGrid();
+    } else if(!shortcuts.length){
+      seedDefaults();
+    }
+  });
 }
 
 function saveData(){
   var user=firebase.auth().currentUser;
-  if(!user||!_btnsRef)return;
+  if(!user||!_pageRef)return;
   _ignoreNextSnap=true;
-  _btnsRef.set(shortcuts);
+  _pageRef.set(shortcuts);
 }
 function savePref(){localStorage.setItem(PREF,JSON.stringify({cols:gridCols}));}
 
@@ -936,9 +958,8 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('logEmail').value='';
     document.getElementById('logPass').value='';
     document.getElementById('loginErr').textContent='';
-    if(_btnsRef){_btnsRef.off();_btnsRef=null;}
-    _btnsListening=false;
     detachTimerListener();
+    _detachPageListener();
     shortcuts=[];
     document.getElementById('scGrid').innerHTML='';
   }
