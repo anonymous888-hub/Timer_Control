@@ -151,15 +151,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .sc-btn::after{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--bc);opacity:.9;pointer-events:none;}
 .sc-btn:not(.sc-ed):hover{transform:translateY(-2px);box-shadow:0 7px 26px rgba(0,0,0,.5);}
 .sc-btn:not(.sc-ed):active{transform:scale(.95);}
-/* cols=1: ปุ่มเป็น row แทน square */
-.cg[style*="--cols:1"] .sc-btn,
-.cg[style*="--cols: 1"] .sc-btn{aspect-ratio:unset;flex-direction:row;justify-content:flex-start;gap:14px;padding:14px 18px;}
-.cg[style*="--cols:1"] .sc-num,
-.cg[style*="--cols: 1"] .sc-num{position:static;font-size:13px;color:rgba(255,255,255,.35);min-width:22px;text-align:right;}
-.cg[style*="--cols:1"] .sc-icon,
-.cg[style*="--cols: 1"] .sc-icon{font-size:26px;}
-.cg[style*="--cols:1"] .sc-add,
-.cg[style*="--cols: 1"] .sc-add{aspect-ratio:unset;flex-direction:row;height:60px;gap:10px;}
 .sc-btn.sc-flash{animation:flash .2s ease;}
 @keyframes flash{0%{filter:brightness(1)}50%{filter:brightness(2.2)}100%{filter:brightness(1)}}
 .sc-btn.sc-ed{cursor:default;border-color:rgba(255,215,0,.3);background:rgba(255,215,0,.03);}
