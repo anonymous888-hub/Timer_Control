@@ -66,6 +66,18 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .prog-track{width:100%;height:2px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin-top:10px;}
 .prog-fill{height:100%;background:var(--accent);transform-origin:left;transition:transform 1s linear,background .5s;}
 
+/* ═══ เวลาพรีเซนต์รวม — การ์ดควบคุมตัวจับเวลาที่สอง แยกอิสระจากตัวหลัก ═══ */
+.live-mini2{background:var(--card);border:1px solid rgba(255,128,171,.16);border-radius:12px;padding:14px 12px;margin-bottom:12px;text-align:center;}
+#liveTime2{font-family:'Bebas Neue',sans-serif;font-size:44px;line-height:1;color:var(--pink);letter-spacing:.03em;font-variant-numeric:tabular-nums;transition:color .4s;}
+#liveTime2.warning{color:var(--yellow);animation:py 1s ease-in-out infinite;}
+#liveTime2.critical{color:var(--red);animation:pr .6s ease-in-out infinite;}
+.live-sub2{font-size:11px;letter-spacing:.28em;color:var(--muted);margin-top:5px;text-transform:uppercase;}
+.ctrl-grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:9px;}
+.ctrl-btn2{padding:10px 6px;border-radius:9px;border:1px solid;
+  font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  cursor:pointer;transition:all .18s;display:flex;align-items:center;justify-content:center;gap:5px;}
+.ctrl-btn2:active{transform:scale(.96);}
+
 .ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;}
 .ctrl-btn{padding:14px 6px;border-radius:10px;border:1px solid;
   font-family:'Share Tech Mono',monospace;font-size:14px;letter-spacing:.14em;text-transform:uppercase;
@@ -400,6 +412,26 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opa
       <div class="adj-chip adj-m" onclick="adjustTime(-600)">－10m</div>
     </div>
 
+    <div class="stitle">เวลาพรีเซนต์รวม (แยกอิสระ)</div>
+    <div class="live-mini2">
+      <div id="liveTime2">00:00</div>
+      <div class="live-sub2" id="liveStatus2">— READY —</div>
+    </div>
+    <div class="ctrl-grid2">
+      <button class="ctrl-btn2 c-start" onclick="sendCmd2('start')">▶ START</button>
+      <button class="ctrl-btn2 c-pause" onclick="sendCmd2('pause')">⏸ PAUSE</button>
+      <button class="ctrl-btn2 c-reset" onclick="sendCmd2('reset')">↺ RESET</button>
+      <button class="ctrl-btn2 c-stop"  onclick="sendCmd2('stop')">■ STOP</button>
+    </div>
+    <div class="set-row" style="margin-bottom:18px;">
+      <input class="t-inp" id="t2HH" type="number" min="0" max="23" placeholder="00" value="0">
+      <span class="t-colon">:</span>
+      <input class="t-inp" id="t2MM" type="number" min="0" max="59" placeholder="10" value="10">
+      <span class="t-colon">:</span>
+      <input class="t-inp" id="t2SS" type="number" min="0" max="59" placeholder="00" value="0">
+      <button class="set-go" onclick="applyCustomTime2()">SET</button>
+    </div>
+
     <div class="stitle">Log</div>
     <div class="log-list" id="logList">
       <div class="log-item" style="justify-content:center;color:var(--muted);font-size:9px;">— waiting —</div>
@@ -516,6 +548,20 @@ let _timerListening = false;
 const elTime = document.getElementById('liveTime');
 const elSt   = document.getElementById('liveStatus');
 const elProg = document.getElementById('progFill');
+
+/* ═══ เวลาพรีเซนต์รวม (timer2) — state แยกอิสระจาก fb หลักด้านบนโดยสิ้นเชิง ═══ */
+const fb2 = {
+  defT:      600,
+  tLeft:     600,
+  running:   false,
+  timeLeft:  600,
+  updatedAt: null,
+};
+let _liveInterval2   = null;
+let _timer2Listening = false;
+
+const elTime2 = document.getElementById('liveTime2');
+const elSt2   = document.getElementById('liveStatus2');
 
 /* ── User-scoped timer paths ── */
 function timerRef(path){
@@ -641,6 +687,136 @@ let db;
 function sendCmd(cmd){
   if(!firebase.auth().currentUser)return;
   applyCmd(cmd);
+}
+
+/* ════════════════════════════════════════════════════════════
+   เวลาพรีเซนต์รวม (timer2) — ฟังก์ชันชุดที่สอง แยกอิสระ 100%
+   ใช้ path users/{uid}/timer2/* จึง start/pause/reset/stop/set
+   ได้โดยไม่กระทบตัวจับเวลาหลัก (users/{uid}/timer/*) เลย
+   ════════════════════════════════════════════════════════════ */
+function timerRef2(path){
+  const user=firebase.auth().currentUser;
+  if(!user)return null;
+  return db.ref('users/'+user.uid+'/timer2/'+path);
+}
+
+function calcCurrentTime2(){
+  if(fb2.running && fb2.updatedAt){
+    const elapsed = Math.max(0, Math.floor((Date.now()-fb2.updatedAt)/1000));
+    return fb2.timeLeft - elapsed;
+  }
+  return fb2.timeLeft;
+}
+
+function attachTimerListener2(){
+  if(_timer2Listening)return;
+  _timer2Listening=true;
+
+  timerRef2('state').on('value',function(snap){
+    const st=snap.val(); if(!st)return;
+    if(typeof st.defaultTime==='number'&&st.defaultTime>0) fb2.defT=st.defaultTime;
+    if(typeof st.timeLeft==='number')  fb2.timeLeft=st.timeLeft;
+    if(typeof st.updatedAt==='number') fb2.updatedAt=st.updatedAt;
+    if(typeof st.isRunning==='boolean') fb2.running=st.isRunning;
+    fb2.tLeft=calcCurrentTime2();
+    renderLive2();
+
+    if(fb2.running && !_liveInterval2) _startLiveInterval2();
+    if(!fb2.running && _liveInterval2){ clearInterval(_liveInterval2); _liveInterval2=null; }
+  });
+
+  if(fb2.running) _startLiveInterval2();
+}
+
+function detachTimerListener2(){
+  const user=firebase.auth().currentUser;
+  if(user&&db) db.ref('users/'+user.uid+'/timer2/state').off();
+  if(_liveInterval2){clearInterval(_liveInterval2);_liveInterval2=null;}
+  _timer2Listening=false;
+  fb2.running=false; fb2.updatedAt=null;
+}
+
+function _startLiveInterval2(){
+  if(_liveInterval2)return;
+  _liveInterval2=setInterval(function(){
+    if(!fb2.running||!fb2.updatedAt)return;
+    fb2.tLeft=calcCurrentTime2();
+    renderLive2();
+  },500);
+}
+
+function renderLive2(){
+  const neg=fb2.tLeft<0, abs=Math.abs(fb2.tLeft);
+  const h=Math.floor(abs/3600), m=Math.floor((abs%3600)/60).toString().padStart(2,'0'), s=(abs%60).toString().padStart(2,'0');
+  elTime2.textContent=h>0?(neg?'-':'')+h+':'+m+':'+s:(neg?'-':'')+m+':'+s;
+  elTime2.classList.remove('warning','critical');
+  if(fb2.tLeft<=0){
+    elTime2.classList.add('critical');
+    elSt2.textContent=fb2.running?'— OVERTIME —':'— STOPPED —';
+  } else if(fb2.tLeft<=CRIT){
+    elTime2.classList.add('critical'); elSt2.textContent='— CRITICAL —';
+  } else if(fb2.tLeft<=WARN){
+    elTime2.classList.add('warning'); elSt2.textContent='— WARNING —';
+  } else {
+    elSt2.textContent=fb2.running?'— RUNNING —':'— READY —';
+  }
+}
+
+function pushTimerState2(isRunning, timeLeftVal, defaultTimeVal){
+  if(!firebase.auth().currentUser||!db)return;
+  timerRef2('state').set({
+    defaultTime: defaultTimeVal,
+    timeLeft:    timeLeftVal,
+    isRunning:   isRunning,
+    updatedAt:   firebase.database.ServerValue.TIMESTAMP
+  });
+}
+
+function applyCmd2(cmd){
+  if(!firebase.auth().currentUser||!db)return;
+
+  if(cmd==='start'){
+    const currentT = calcCurrentTime2();
+    fb2.running=true; fb2.timeLeft=currentT; fb2.updatedAt=null; fb2.tLeft=currentT;
+    renderLive2();
+    timerRef2('command').set(cmd);
+    pushTimerState2(true, currentT, fb2.defT);
+    if(!_liveInterval2) _startLiveInterval2();
+
+  } else if(cmd==='pause'){
+    const currentT = calcCurrentTime2();
+    fb2.running=false; fb2.timeLeft=currentT; fb2.updatedAt=null; fb2.tLeft=currentT;
+    if(_liveInterval2){ clearInterval(_liveInterval2); _liveInterval2=null; }
+    renderLive2();
+    timerRef2('command').set(cmd);
+    pushTimerState2(false, currentT, fb2.defT);
+
+  } else if(cmd==='reset' || cmd==='stop'){
+    fb2.running=false; fb2.timeLeft=fb2.defT; fb2.updatedAt=null; fb2.tLeft=fb2.defT;
+    if(_liveInterval2){ clearInterval(_liveInterval2); _liveInterval2=null; }
+    renderLive2();
+    timerRef2('command').set(cmd);
+    pushTimerState2(false, fb2.defT, fb2.defT);
+  }
+}
+
+function sendCmd2(cmd){
+  if(!firebase.auth().currentUser)return;
+  applyCmd2(cmd);
+}
+
+function applyCustomTime2(){
+  if(!firebase.auth().currentUser)return;
+  const h=+document.getElementById('t2HH').value||0,
+        m=+document.getElementById('t2MM').value||0,
+        s=+document.getElementById('t2SS').value||0;
+  const t=h*3600+m*60+s; if(t<=0)return;
+  if(_liveInterval2){ clearInterval(_liveInterval2); _liveInterval2=null; }
+  fb2.defT=t; fb2.tLeft=t; fb2.running=false;
+  fb2.timeLeft=t; fb2.updatedAt=null;
+  renderLive2();
+  timerRef2('command').set('set_'+t);
+  pushTimerState2(false, t, t);
 }
 
 function setPreset(sec, el){
@@ -938,6 +1114,7 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('uName').textContent=user.displayName||user.email;
     if(user.photoURL){const a=document.getElementById('uAvatar');a.src=user.photoURL;a.style.display='block';}
     attachTimerListener();
+    attachTimerListener2();
     loadData();
   }else{
     document.getElementById('loginScreen').style.cssText='display:flex;opacity:1;';
@@ -947,6 +1124,7 @@ firebase.auth().onAuthStateChanged(function(user){
     document.getElementById('logPass').value='';
     document.getElementById('loginErr').textContent='';
     detachTimerListener();
+    detachTimerListener2();
     _detachPageListener();
     shortcuts=[];
     document.getElementById('scGrid').innerHTML='';
@@ -954,6 +1132,7 @@ firebase.auth().onAuthStateChanged(function(user){
 });
 
 renderLive();
+renderLive2();
 </script>
 </body>
 </html>
